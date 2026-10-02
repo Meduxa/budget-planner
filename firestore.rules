@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// Paste into Firebase console → Firestore Database → Rules → Publish.
+// Only the people listed below can read or change the data.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isTeamMember() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          "you@yourcompany.com"
+          // , "colleague@yourcompany.com"
+        ];
+      // Or allow a whole company domain instead of a list:
+      //   && request.auth.token.email.matches('.*@yourcompany[.]com$');
+    }
+
+    // departments/{dept}/budget/{year}, .../forecast/{year}, .../payments/{year}
+    match /departments/{dept}/{kind}/{year} {
+      allow read: if isTeamMember() && kind in ['budget', 'forecast', 'payments'];
+      allow write: if isTeamMember()
+        && kind in ['budget', 'forecast', 'payments']
+        && year.matches('^[0-9]{4}$');
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
