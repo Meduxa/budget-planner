@@ -8,16 +8,18 @@ and the site is hosted on **GitHub Pages**.
 
 ## Try it locally first
 
-Double-click `index.html`. Until `js/config.js` has your Firebase settings, the
-app runs in **demo mode**: it starts from the figures in `js/local-seed.js`
-(copied from the Excel sheets) and saves your edits only in this browser.
-Use **Reset demo data** in the yellow bar to start over.
-
-If your browser blocks something when opening the file directly, serve the folder instead:
+Serve the folder and open the address it prints (usually <http://localhost:3000>):
 
 ```bash
 npx serve .
 ```
+
+Google sign-in only works from `http://localhost` or the GitHub Pages address —
+not from a double-clicked `index.html` (Firebase doesn't allow `file://` pages).
+
+Add `?demo` to the address (e.g. <http://localhost:3000/?demo>) for **demo mode**:
+it starts from the figures in `js/local-seed.js` (copied from the Excel sheets)
+and saves edits only in this browser. **Reset demo data** in the yellow bar starts over.
 
 ## Pages
 
