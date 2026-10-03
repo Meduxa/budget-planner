@@ -13,6 +13,7 @@ window.BP = window.BP || {};
 
   const nf0 = new Intl.NumberFormat(S.locale, { maximumFractionDigits: 0 });
   const nf2 = new Intl.NumberFormat(S.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const nfRate = new Intl.NumberFormat(S.locale, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   const money0 = new Intl.NumberFormat(S.locale, {
     style: "currency", currency: S.currency, currencyDisplay: "narrowSymbol", maximumFractionDigits: 0,
   });
@@ -23,6 +24,7 @@ window.BP = window.BP || {};
   const fmt = {
     num: (v) => (v == null ? "—" : nf0.format(v)),
     num2: (v) => (v == null ? "—" : nf2.format(v)),
+    rate: (v) => (v == null ? "—" : nfRate.format(v)),
     money: (v) => (v == null ? "—" : money0.format(v)),
     compact: (v) => compactNf.format(v),
     pct: (v) => (v == null || !Number.isFinite(v) ? "—" : pctNf.format(v)),

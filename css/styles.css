@@ -287,7 +287,8 @@ tr.is-overdue > * { background: var(--critical-wash); }
 /* ───────── payments ───────── */
 .fx-line { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; color: var(--text-2); }
 .fx-line b { color: var(--text); }
-.fx input { width: 6em; }
+.fx input, .data-table input.rate-input { width: 6em; }
+.pay-table select[data-field=category] { min-width: 13em; }
 
 /* ───────── small screens ───────── */
 @media (max-width: 560px) {

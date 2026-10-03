@@ -6,7 +6,9 @@ BP.views.dashboard = (function () {
   const { fmt, esc } = U;
   let chartMetric = "revenue";
 
-  function allTotals(budget) {
+  // Procurement actuals = paid supplier payments, converted to GEL at each payment's own rate.
+  function allTotals(app) {
+    const budget = M.withPaymentActuals(app.data.budget, app.data.payments);
     return Object.fromEntries(M.METRICS.map(({ key }) => [key, M.totals(budget.metrics[key])]));
   }
 
@@ -18,18 +20,18 @@ BP.views.dashboard = (function () {
     </div>`;
   }
 
-  function moneyTile(label, series) {
+  function moneyTile(label, series, actualLabel = "Actual") {
     const year = M.agg(series, U.ALL);
     const td = M.toDate(series);
     const lines = td.months.length
-      ? [`Actual ${U.monthRange(td.months)}: <b>${fmt.money(td.fact)}</b>`,
+      ? [`${actualLabel} ${U.monthRange(td.months)}: <b>${fmt.money(td.fact)}</b>`,
         `${fmt.pct(td.pct)} of plan for those months`]
-      : ["No actuals entered yet"];
+      : [`No ${actualLabel.toLowerCase()} yet`];
     return kpiTile(`${label} · annual plan`, fmt.money(year.plan), lines);
   }
 
   function render(el, app) {
-    const T = allTotals(app.data.budget);
+    const T = allTotals(app);
     const mg = M.margin(T.revenue, T.profit, U.ALL);
     const mgMonths = U.ALL.filter((m) => T.revenue.fact[m] != null && T.profit.fact[m] != null);
 
@@ -40,7 +42,7 @@ BP.views.dashboard = (function () {
         mgMonths.length
           ? [`Actual ${U.monthRange(mgMonths)}: <b>${fmt.pct(mg.fact)}</b>`, "Profit ÷ revenue"]
           : ["Profit ÷ revenue", "No actuals entered yet"]),
-      moneyTile("Procurement", T.procurement),
+      moneyTile("Procurement", T.procurement, "Paid to suppliers"),
     ].join("");
 
     const metricOpts = M.METRICS.map((x) => ({ value: x.key, label: x.label }));
@@ -110,7 +112,8 @@ BP.views.dashboard = (function () {
 
     const sub3 = `<th class="num grp-start">Plan</th><th class="num">Actual</th><th class="num">%</th>`;
     return `<table class="data-table">
-      <caption>Actual as % of plan. Quarter and annual margins are total profit ÷ total revenue.</caption>
+      <caption>Actual as % of plan. Quarter and annual margins are total profit ÷ total revenue.
+        Procurement actual = paid supplier payments in ${U.S.currency}.</caption>
       <thead>
         <tr><th rowspan="2" class="sticky">Period</th>
           <th colspan="3" class="grp grp-start">Revenue</th><th colspan="3" class="grp grp-start">Profit</th>

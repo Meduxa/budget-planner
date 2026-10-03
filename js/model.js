@@ -2,7 +2,9 @@
 //
 // budget   { metrics: { revenue|profit|procurement: { rows: [{id,name,type:"line"|"memo",plan[12],fact[12]}], totalFact[12] } } }
 // forecast { deals: [{id, month 0-11, week 1-5, product, status, usd, gel, profit}] }
-// payments { fx: {USD, EUR}, items: [{id, month 0-11, supplier, amount, currency, date "YYYY-MM-DD", status "paid"|"scheduled"}] }
+// payments { fx: {USD, EUR} (defaults for new payments),
+//            items: [{id, month 0-11, supplier, category, amount, currency, rate, date "YYYY-MM-DD", status "paid"|"scheduled"}] }
+//            Paid payments are the Procurement actuals (GEL = amount × own rate).
 //
 // Totals: plan = sum of "line" rows (memo rows are "of which" info, never added).
 // Actual  = sum of line actuals when any line has an actual that month,
@@ -115,34 +117,88 @@
   }
 
   // ── payments ──
+  // Each payment keeps its OWN exchange rate (GEL per 1 unit), fixed when it is
+  // entered, so later changes to the default rate never alter past payments.
+  // `fx` holds only the defaults pre-filled on new payments.
+  const defaultRate = (currency, fx) => (currency === S.currency ? 1 : U.toNum(fx?.[currency]));
+
   function normalizePayments(doc) {
+    const fx = { ...S.defaultFx, ...(doc?.fx || {}) };
     return {
-      fx: { ...S.defaultFx, ...(doc?.fx || {}) },
-      items: (doc?.items || []).map((p) => ({
-        id: p.id || U.uid(),
-        month: clampInt(p.month, 0, 11),
-        supplier: String(p.supplier ?? ""),
-        amount: U.toNum(p.amount),
-        currency: S.paymentCurrencies.includes(p.currency) ? p.currency : S.paymentCurrencies[0],
-        date: /^\d{4}-\d{2}-\d{2}$/.test(p.date || "") ? p.date : "",
-        status: p.status === "paid" ? "paid" : "scheduled",
-      })),
+      fx,
+      items: (doc?.items || []).map((p) => {
+        const currency = S.paymentCurrencies.includes(p.currency) ? p.currency : S.paymentCurrencies[0];
+        return {
+          id: p.id || U.uid(),
+          month: clampInt(p.month, 0, 11),
+          supplier: String(p.supplier ?? ""),
+          category: S.paymentCategories.includes(p.category) ? p.category : "",
+          amount: U.toNum(p.amount),
+          currency,
+          // older payments had no rate of their own: fix them at the rate saved with them
+          rate: currency === S.currency ? 1 : (U.toNum(p.rate) ?? defaultRate(currency, fx)),
+          date: /^\d{4}-\d{2}-\d{2}$/.test(p.date || "") ? p.date : "",
+          status: p.status === "paid" ? "paid" : "scheduled",
+        };
+      }),
     };
   }
 
-  function newPayment(month) {
-    return { id: U.uid(), month, supplier: "", amount: null, currency: S.paymentCurrencies[0], date: "", status: "scheduled" };
+  function newPayment(month, fx) {
+    const currency = S.paymentCurrencies[0];
+    return { id: U.uid(), month, supplier: "", category: "", amount: null, currency,
+      rate: defaultRate(currency, fx), date: "", status: "scheduled" };
   }
 
-  function toBase(amount, currency, fx) {
-    if (amount == null) return null;
-    if (currency === S.currency) return amount;
-    const rate = U.toNum(fx?.[currency]);
-    return rate == null ? null : amount * rate;
+  // Payment value in GEL at its own rate.
+  function paymentBase(p) {
+    if (p.amount == null) return null;
+    const rate = p.currency === S.currency ? 1 : U.toNum(p.rate);
+    return rate == null ? null : p.amount * rate;
+  }
+
+  // Paid payments in GEL → { label: [12 months] } ("" = no label)
+  function paidByLabel(payments) {
+    const out = {};
+    (payments?.items || []).forEach((p) => {
+      const v = p.status === "paid" ? paymentBase(p) : null;
+      if (v == null) return;
+      const arr = (out[p.category || ""] ||= n12());
+      arr[p.month] = (arr[p.month] || 0) + v;
+    });
+    return out;
+  }
+
+  // Procurement with Actuals taken from paid supplier payments (in GEL):
+  // each budget line gets the paid payments whose label matches its name.
+  // Paid payments with no label (or a label matching no line) go on a
+  // "Not labelled" line so the total always equals everything paid.
+  const UNLABELLED_ID = "__unlabelled";
+  function procurementActuals(metric, payments) {
+    const paid = paidByLabel(payments);
+    const lineNames = new Set(metric.rows.filter((r) => r.type === "line").map((r) => r.name));
+    const rows = metric.rows.map((r) => (r.type === "line" ? { ...r, fact: paid[r.name] ? [...paid[r.name]] : n12() } : r));
+    const orphan = n12();
+    Object.entries(paid).forEach(([label, arr]) => {
+      if (lineNames.has(label)) return;
+      arr.forEach((v, m) => { if (v != null) orphan[m] = (orphan[m] || 0) + v; });
+    });
+    if (orphan.some((v) => v != null)) {
+      const lastLine = rows.map((r) => r.type).lastIndexOf("line");
+      rows.splice(lastLine + 1, 0, { id: UNLABELLED_ID, name: "Not labelled (supplier payments)", type: "line",
+        derived: true, plan: n12(), fact: orphan });
+    }
+    return { rows, totalFact: n12() };
+  }
+
+  // Budget as shown everywhere: procurement actuals come from paid payments.
+  function withPaymentActuals(budget, payments) {
+    return { metrics: { ...budget.metrics, procurement: procurementActuals(budget.metrics.procurement, payments) } };
   }
 
   BP.model = {
     METRICS, STATUS_KEYS, newRow, normalizeBudget, lineFactsIn, totals, agg, toDate, margin,
-    normalizeForecast, newDeal, forecastByMonth, normalizePayments, newPayment, toBase,
+    normalizeForecast, newDeal, forecastByMonth,
+    normalizePayments, newPayment, defaultRate, paymentBase, procurementActuals, withPaymentActuals,
   };
 })();

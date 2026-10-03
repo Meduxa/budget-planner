@@ -10,6 +10,13 @@ BP.views.budget = (function () {
 
   const doc = (app) => (st.editing ? st.draft : app.data.budget);
   const currentQuarter = () => `q${Math.floor(new Date().getMonth() / 3)}`;
+  const isProc = () => st.metric === "procurement";
+
+  // The metric as displayed: Procurement actuals come from paid supplier payments.
+  function metricOf(app) {
+    const d = doc(app);
+    return isProc() ? M.procurementActuals(d.metrics.procurement, app.data.payments) : d.metrics[st.metric];
+  }
 
   function columns() {
     const cols = [];
@@ -36,7 +43,7 @@ BP.views.budget = (function () {
 
   function calc(app, rowKey, col) {
     const d = doc(app);
-    const metric = d.metrics[st.metric];
+    const metric = metricOf(app);
     if (rowKey === "__total") {
       const a = M.agg(M.totals(metric), col.months);
       return col.kind === "pct" ? fmt.pct(a.pct) : fmt.num(a[col.kind]);
@@ -56,15 +63,18 @@ BP.views.budget = (function () {
   const cellCls = (c) => `num${c.agg ? " agg" : ""}${c.first ? " grp-start" : ""}${c.kind === "pct" ? " pct" : ""}`;
   const colName = (c) => (c.kind === "plan" ? "plan" : "actual");
 
+  // Procurement line actuals are calculated from payments, never typed.
+  const factFromPayments = (row) => isProc() && row.type === "line";
+
   function rowHtml(row) {
-    const name = st.editing
+    const name = st.editing && !row.derived
       ? `<th scope="row" class="sticky"><div class="name-edit">
            <input class="name-input" data-row="${row.id}" data-field="name" value="${esc(row.name)}" aria-label="Line name">
            <button class="icon-btn" data-del="${row.id}" aria-label="Remove line ${esc(row.name)}" title="Remove line">×</button>
          </div></th>`
       : `<th scope="row" class="sticky">${esc(row.name)}</th>`;
     const cells = st.cols.map((c, ci) => {
-      if (st.editing && c.edit != null) {
+      if (st.editing && c.edit != null && !row.derived && !(c.kind === "fact" && factFromPayments(row))) {
         return `<td class="${cellCls(c)}"><input type="number" step="any" inputmode="decimal"
           data-row="${row.id}" data-field="${c.kind}" data-m="${c.edit}" value="${row[c.kind][c.edit] ?? ""}"
           aria-label="${esc(row.name)} ${U.MONTHS[c.edit]} ${colName(c)}"></td>`;
@@ -76,7 +86,7 @@ BP.views.budget = (function () {
 
   function totalRowHtml(metric) {
     const cells = st.cols.map((c, ci) => {
-      if (st.editing && c.edit != null && c.kind === "fact") {
+      if (st.editing && c.edit != null && c.kind === "fact" && !isProc()) {
         return `<td class="${cellCls(c)}"><input type="number" step="any" inputmode="decimal"
           data-total-fact="${c.edit}" value="${metric.totalFact[c.edit] ?? ""}"
           aria-label="Total ${U.MONTHS[c.edit]} actual"
@@ -92,8 +102,7 @@ BP.views.budget = (function () {
     if (st.editing && st.period === "year") st.period = currentQuarter();
     st.cols = columns();
 
-    const d = doc(app);
-    const metric = d.metrics[st.metric];
+    const metric = metricOf(app);
     const info = M.METRICS.find((x) => x.key === st.metric);
     const lines = metric.rows.filter((r) => r.type === "line");
     const memos = metric.rows.filter((r) => r.type === "memo");
@@ -113,9 +122,12 @@ BP.views.budget = (function () {
     el.innerHTML = `
       <div class="view-head">
         <div><h2>Budget detail ${app.year}</h2>
-          <p class="sub">${st.editing
-            ? "Editing: type Plan and Actual per line. If you only know the month's total actual, type it in the Total row."
-            : `Plan vs actual by budget line, in ${U.S.currency}.`}</p></div>
+          <p class="sub">${isProc()
+            ? `Actual = paid supplier payments in ${U.S.currency}, by label and month — change them on the
+               <a href="#payments">Supplier payments</a> page.${st.editing ? " Keep line names identical to the payment labels." : ""}`
+            : st.editing
+              ? "Editing: type Plan and Actual per line. If you only know the month's total actual, type it in the Total row."
+              : `Plan vs actual by budget line, in ${U.S.currency}.`}</p></div>
         <div class="actions">${U.editActions(st.editing)}</div>
       </div>
       <div class="toolbar">

@@ -54,6 +54,18 @@ window.BP_CONFIG = {
 
     // Supplier payments
     paymentCurrencies: ["EUR", "USD", "GEL"],
-    defaultFx: { USD: 2.70, EUR: 3.15 },         // GEL per 1 unit; editable in the app
+    defaultFx: { USD: 2.70, EUR: 3.15 },         // GEL per 1 unit, pre-filled on NEW payments only
+    // Label dropdown on each payment. Paid payments are added to Procurement → Actual
+    // on the budget line with the same name, in the payment's month.
+    paymentCategories: [
+      "ექოსკოპია",
+      "ენდოსკოპია",
+      "ლაპაროსკოპია",
+      "ოფთალმოლოგია",
+      "სტერილიზაცია",
+      "სიმულატორები",
+      "რადიოლოგია",
+      "სამედიცინო აირი",
+    ],
   },
 };
