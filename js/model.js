@@ -90,19 +90,44 @@
   }
 
   // ── forecast ──
+  // A snapshot freezes the whole forecast (all deals) plus the revenue target and
+  // actuals of that moment, so a reported weekly plan can be shown later unchanged.
   function normalizeForecast(doc) {
     return {
-      deals: (doc?.deals || []).map((d) => ({
-        id: d.id || U.uid(),
-        month: clampInt(d.month, 0, 11),
-        week: clampInt(d.week, 1, 5),
-        product: String(d.product ?? ""),
-        status: STATUS_KEYS.includes(d.status) ? d.status : STATUS_KEYS[STATUS_KEYS.length - 1],
-        usd: U.toNum(d.usd),
-        gel: U.toNum(d.gel),
-        profit: U.toNum(d.profit),
+      deals: normalizeDeals(doc?.deals),
+      snapshots: (doc?.snapshots || []).map((s) => ({
+        id: s.id || U.uid(),
+        name: String(s.name ?? "Snapshot"),
+        savedAt: String(s.savedAt || ""),
+        savedBy: s.savedBy ?? null,
+        deals: normalizeDeals(s.deals),
+        target: { plan: arr12(s.target?.plan), fact: arr12(s.target?.fact) },
       })),
     };
+  }
+
+  function makeSnapshot(name, deals, revenueTotals, savedBy) {
+    return {
+      id: U.uid(),
+      name,
+      savedAt: new Date().toISOString(),
+      savedBy: savedBy ?? null,
+      deals: JSON.parse(JSON.stringify(deals)),
+      target: { plan: [...revenueTotals.plan], fact: [...revenueTotals.fact] },
+    };
+  }
+
+  function normalizeDeals(list) {
+    return (list || []).map((d) => ({
+      id: d.id || U.uid(),
+      month: clampInt(d.month, 0, 11),
+      week: clampInt(d.week, 1, 5),
+      product: String(d.product ?? ""),
+      status: STATUS_KEYS.includes(d.status) ? d.status : STATUS_KEYS[STATUS_KEYS.length - 1],
+      usd: U.toNum(d.usd),
+      gel: U.toNum(d.gel),
+      profit: U.toNum(d.profit),
+    }));
   }
 
   function newDeal(month, week) {
@@ -114,6 +139,16 @@
     const out = U.ALL.map(() => Object.fromEntries(STATUS_KEYS.map((k) => [k, 0])));
     deals.forEach((d) => { out[d.month][d.status] += d.gel || 0; });
     return out;
+  }
+
+  // Per month: actual revenue if the month has one, otherwise the sales forecast.
+  // outlook = actual for closed months + forecast for open months.
+  function outlookByMonth(revenue, byMonth) {
+    return U.ALL.map((m) => {
+      const forecast = U.sum(STATUS_KEYS.map((k) => byMonth[m][k]));
+      const actual = revenue.fact[m];
+      return { actual, forecast, open: actual == null, outlook: actual != null ? actual : forecast };
+    });
   }
 
   // ── payments ──
@@ -198,7 +233,7 @@
 
   BP.model = {
     METRICS, STATUS_KEYS, newRow, normalizeBudget, lineFactsIn, totals, agg, toDate, margin,
-    normalizeForecast, newDeal, forecastByMonth,
+    normalizeForecast, makeSnapshot, newDeal, forecastByMonth, outlookByMonth,
     normalizePayments, newPayment, defaultRate, paymentBase, procurementActuals, withPaymentActuals,
   };
 })();

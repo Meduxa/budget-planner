@@ -1,6 +1,8 @@
 // Sales forecast: how each month's revenue target will be hit.
 // Top: target coverage for the whole year (chart + table).
 // Bottom: one month's deals by week (I–V), editable.
+// Frozen versions ("Week I", "Week II", …) keep the forecast exactly as reported
+// at a meeting; they are read-only and can be compared with today's forecast.
 BP.views = BP.views || {};
 BP.views.forecast = (function () {
   const U = BP.util;
@@ -9,8 +11,18 @@ BP.views.forecast = (function () {
   const STATUSES = U.S.dealStatuses;
   const statusOf = (k) => STATUSES.find((s) => s.key === k) || STATUSES[STATUSES.length - 1];
 
-  const st = { month: null, editing: false, draft: null, dirty: false };
-  const deals = (app) => (st.editing ? st.draft : app.data.forecast).deals;
+  // view = id of the frozen version being shown (null = live forecast)
+  const st = { month: null, editing: false, draft: null, dirty: false, view: null, freezing: false };
+  const snapshots = (app) => app.data.forecast.snapshots || [];
+  const snapOf = (app) => (st.view ? snapshots(app).find((s) => s.id === st.view) || null : null);
+  const deals = (app) => snapOf(app)?.deals ?? (st.editing ? st.draft : app.data.forecast).deals;
+
+  function savedWhen(s) {
+    const d = new Date(s.savedAt);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(U.S.locale,
+      { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+  const defaultSnapName = () => `Week ${U.ROMAN[Math.min(5, Math.ceil(new Date().getDate() / 7))]}`;
 
   function defaultMonth(app) {
     const now = new Date();
@@ -20,20 +32,25 @@ BP.views.forecast = (function () {
   }
 
   function monthStats(app) {
-    const target = M.totals(app.data.budget.metrics.revenue);
+    const target = snapOf(app)?.target ?? M.totals(app.data.budget.metrics.revenue);
     const byMonth = M.forecastByMonth(deals(app));
     return { target, byMonth };
   }
 
   function render(el, app) {
     if (st.month == null) st.month = defaultMonth(app);
+    if (st.view && !snapOf(app)) st.view = null; // version was deleted
+    const snap = snapOf(app);
 
     el.innerHTML = `
       <div class="view-head">
         <div><h2>Sales forecast ${app.year}</h2>
           <p class="sub">Expected sales by month and week, compared with the revenue plan (${U.S.currency}).</p></div>
-        <div class="actions">${U.editActions(st.editing)}</div>
+        <div class="actions">${snap
+          ? `<button class="btn" data-action="live">Back to live forecast</button>`
+          : U.editActions(st.editing)}</div>
       </div>
+      ${snapBar(app, snap)}
 
       <div class="card">
         <div class="card-head"><h3>Target coverage</h3></div>
@@ -48,10 +65,122 @@ BP.views.forecast = (function () {
         <h3 class="month-title">${U.MONTHS[st.month]} ${app.year}</h3>
         <div id="fcSummary"></div>
         <div id="fcWeeks">${weeksHtml(app)}</div>
-      </div>`;
+      </div>
+      ${snap ? `<div class="card" id="fcCompare"></div>` : ""}`;
 
     updateComputed(el, app);
     bind(el, app);
+    if (st.freezing) el.querySelector("[data-freeze-form] input")?.select();
+  }
+
+  // ── frozen versions ──
+  function snapBar(app, snap) {
+    const list = [...snapshots(app)].sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+    return `
+      <div class="snap-bar">
+        <label class="snap-select">Showing
+          <select data-snap-select aria-label="Forecast version"${st.editing ? " disabled" : ""}>
+            <option value="">Live forecast (today)</option>
+            ${list.map((s) => `<option value="${s.id}"${s.id === st.view ? " selected" : ""}>❄ ${esc(s.name)} — ${savedWhen(s)}</option>`).join("")}
+          </select>
+        </label>
+        ${!snap && !st.editing && !st.freezing ? `<button class="btn" data-action="freeze">❄ Freeze this forecast…</button>` : ""}
+        ${snap ? `<button class="btn ghost danger" data-action="delete-snap">Delete this version</button>` : ""}
+        ${list.length || st.freezing ? "" : `<span class="note">No frozen versions yet — freeze the forecast after each board meeting.</span>`}
+      </div>
+      ${st.freezing ? `
+        <form class="freeze-form" data-freeze-form>
+          <label>Name <input name="snapName" value="${esc(defaultSnapName())}" maxlength="60" required aria-label="Name of the frozen version"></label>
+          <button class="btn primary" type="submit">Save frozen version</button>
+          <button class="btn" type="button" data-action="freeze-cancel">Cancel</button>
+          <p class="note">Saves every month's deals, targets and actuals exactly as they are now. Later changes won't affect it.</p>
+        </form>` : ""}
+      ${snap ? `<div class="frozen-banner" role="status">❄ <span><b>Frozen version “${esc(snap.name)}”</b>, saved ${savedWhen(snap)}${snap.savedBy ? ` by ${esc(snap.savedBy)}` : ""}.
+        Read-only — the figures are exactly as they were then. See what changed since then at the bottom of the page.</span></div>` : ""}`;
+  }
+
+  async function saveSnapshot(el, app, name) {
+    const existing = snapshots(app).find((s) => s.name.toLowerCase() === name.toLowerCase());
+    if (existing && !confirm(`A version named “${existing.name}” already exists (saved ${savedWhen(existing)}). Save another one with the same name?`)) return;
+    const snap = M.makeSnapshot(name, app.data.forecast.deals, M.totals(app.data.budget.metrics.revenue), app.user?.email);
+    const doc = { deals: app.data.forecast.deals, snapshots: [...snapshots(app), snap] };
+    if (await app.save("forecast", doc)) {
+      st.freezing = false;
+      render(el, app);
+      app.status(`Frozen version “${name}” saved.`);
+    }
+  }
+
+  async function deleteSnapshot(el, app) {
+    const snap = snapOf(app);
+    if (!snap || !confirm(`Delete the frozen version “${snap.name}” (saved ${savedWhen(snap)})? This can't be undone.`)) return;
+    const doc = { deals: app.data.forecast.deals, snapshots: snapshots(app).filter((s) => s.id !== snap.id) };
+    if (await app.save("forecast", doc)) { st.view = null; render(el, app); }
+  }
+
+  // Frozen version vs today's live forecast.
+  function compareHtml(app, snap) {
+    const nowT = M.totals(app.data.budget.metrics.revenue);
+    const nowDeals = app.data.forecast.deals;
+    const thenPer = M.outlookByMonth(snap.target, M.forecastByMonth(snap.deals));
+    const nowPer = M.outlookByMonth(nowT, M.forecastByMonth(nowDeals));
+    const delta = (a, b) => {
+      const d = (b || 0) - (a || 0);
+      return Math.abs(d) < 0.5 ? `<span class="muted">—</span>` : d > 0 ? `<span class="pos">+${fmt.num(d)}</span>` : `<span class="neg">−${fmt.num(-d)}</span>`;
+    };
+    const months = U.ALL.filter((m) => thenPer[m].forecast || nowPer[m].forecast);
+    const row = (label, ms, cls) => {
+      const s = (per, k) => U.sum(ms.map((m) => per[m][k]));
+      return `<tr class="${cls}"><th scope="row" class="sticky">${label}</th>
+        <td class="num grp-start">${fmt.num(s(thenPer, "forecast"))}</td><td class="num">${fmt.num(s(nowPer, "forecast"))}</td>
+        <td class="num">${delta(s(thenPer, "forecast"), s(nowPer, "forecast"))}</td>
+        <td class="num grp-start">${fmt.num(s(thenPer, "outlook"))}</td><td class="num">${fmt.num(s(nowPer, "outlook"))}</td>
+        <td class="num">${delta(s(thenPer, "outlook"), s(nowPer, "outlook"))}</td></tr>`;
+    };
+
+    // deal-level changes in the selected month
+    const m = st.month;
+    const thenMap = new Map(snap.deals.map((d) => [d.id, d]));
+    const nowMap = new Map(nowDeals.map((d) => [d.id, d]));
+    const changes = [];
+    nowDeals.filter((d) => d.month === m).forEach((d) => {
+      const t = thenMap.get(d.id);
+      if (!t) changes.push({ name: d.product, what: "New deal", then: null, now: d.gel });
+      else if (t.month !== m) changes.push({ name: d.product, what: `Moved in from ${U.MONTHS_SHORT[t.month]}`, then: null, now: d.gel });
+      else {
+        const what = [];
+        if ((t.gel || 0) !== (d.gel || 0)) what.push("Value changed");
+        if (t.status !== d.status) what.push(`${statusOf(t.status).label} → ${statusOf(d.status).label}`);
+        if (t.week !== d.week) what.push(`Week ${U.ROMAN[t.week]} → ${U.ROMAN[d.week]}`);
+        if (t.product !== d.product) what.push(`Renamed from “${t.product}”`);
+        if (what.length) changes.push({ name: d.product, what: what.join(" · "), then: t.gel, now: d.gel });
+      }
+    });
+    snap.deals.filter((t) => t.month === m).forEach((t) => {
+      const d = nowMap.get(t.id);
+      if (!d) changes.push({ name: t.product, what: "Removed", then: t.gel, now: null });
+      else if (d.month !== m) changes.push({ name: t.product, what: `Moved to ${U.MONTHS_SHORT[d.month]}`, then: t.gel, now: null });
+    });
+
+    return `
+      <div class="card-head"><h3>What changed since “${esc(snap.name)}”</h3></div>
+      <p class="note">Frozen version (then) vs the live forecast today (now), in ${U.S.currency}.</p>
+      <div class="table-wrap"><table class="data-table">
+        <thead>
+          <tr><th rowspan="2" class="sticky">Month</th><th colspan="3" class="grp grp-start">Forecast</th><th colspan="3" class="grp grp-start">Outlook</th></tr>
+          <tr><th class="num grp-start">Then</th><th class="num">Now</th><th class="num">Change</th>
+            <th class="num grp-start">Then</th><th class="num">Now</th><th class="num">Change</th></tr>
+        </thead>
+        <tbody>${months.map((x) => row(U.MONTHS[x], [x], x === m ? "selected" : "")).join("")}
+          ${row("Year", U.ALL, "row-annual")}</tbody>
+      </table></div>
+      <h4 class="sub-title">Deal changes in ${U.MONTHS[m]}</h4>
+      ${changes.length ? `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Deal</th><th>What changed</th><th class="num">Then</th><th class="num">Now</th><th class="num">Difference</th></tr></thead>
+        <tbody>${changes.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.what)}</td>
+          <td class="num">${c.then == null ? "—" : fmt.num(c.then)}</td><td class="num">${c.now == null ? "—" : fmt.num(c.now)}</td>
+          <td class="num">${delta(c.then, c.now)}</td></tr>`).join("")}</tbody>
+      </table></div>` : `<p class="empty">No deal changes in ${U.MONTHS[m]} since this version.</p>`}`;
   }
 
   // ── computed parts (redrawn on every edit) ──
@@ -74,6 +203,8 @@ BP.views.forecast = (function () {
 
     el.querySelector("#fcTable").innerHTML = coverageTable(byMonth, target);
     el.querySelector("#fcSummary").innerHTML = summaryHtml(byMonth[st.month], target, st.month);
+    const snap = snapOf(app);
+    if (snap) el.querySelector("#fcCompare").innerHTML = compareHtml(app, snap);
 
     el.querySelectorAll("[data-calc]").forEach((node) => {
       const [scope, field] = node.dataset.calc.split("|");
@@ -85,9 +216,8 @@ BP.views.forecast = (function () {
 
   // Outlook = actual for months that are closed (have an actual), forecast for the rest.
   function outlookOf(byMonth, target, months) {
-    return U.sum(months.map((m) => (target.fact[m] != null
-      ? target.fact[m]
-      : U.sum(STATUSES.map((x) => byMonth[m][x.key])))));
+    const per = M.outlookByMonth(target, byMonth);
+    return U.sum(months.map((m) => per[m].outlook));
   }
 
   function coverageTable(byMonth, target) {
@@ -151,7 +281,9 @@ BP.views.forecast = (function () {
   function weeksHtml(app) {
     const list = deals(app).filter((d) => d.month === st.month);
     if (!list.length && !st.editing) {
-      return `<p class="empty">No deals entered for ${U.MONTHS[st.month]} yet. Click <b>Edit</b> to add them.</p>`;
+      return snapOf(app)
+        ? `<p class="empty">This frozen version has no deals for ${U.MONTHS[st.month]}.</p>`
+        : `<p class="empty">No deals entered for ${U.MONTHS[st.month]} yet. Click <b>Edit</b> to add them.</p>`;
     }
     const weeks = [1, 2, 3, 4, 5].filter((w) => st.editing || list.some((d) => d.week === w));
     const head = `<thead><tr><th>Product / deal</th><th>Status</th><th class="num">USD</th>
@@ -212,13 +344,25 @@ BP.views.forecast = (function () {
       }
       const action = e.target.closest("[data-action]")?.dataset.action;
       if (action === "edit") {
-        st.editing = true; st.dirty = false; st.draft = U.clone(app.data.forecast); render(el, app);
+        st.editing = true; st.dirty = false; st.freezing = false; st.draft = U.clone(app.data.forecast); render(el, app);
       } else if (action === "cancel") {
         if (st.dirty && !confirm("Discard unsaved changes?")) return;
         reset(); render(el, app);
       } else if (action === "save") {
-        const clean = { deals: st.draft.deals.filter((d) => d.product.trim() || d.gel != null || d.usd != null) };
+        // keep the frozen versions; only the live deals change
+        const clean = {
+          deals: st.draft.deals.filter((d) => d.product.trim() || d.gel != null || d.usd != null),
+          snapshots: snapshots(app),
+        };
         if (await app.save("forecast", clean)) { reset(); render(el, app); }
+      } else if (action === "freeze") {
+        st.freezing = true; render(el, app);
+      } else if (action === "freeze-cancel") {
+        st.freezing = false; render(el, app);
+      } else if (action === "live") {
+        st.view = null; render(el, app);
+      } else if (action === "delete-snap") {
+        deleteSnapshot(el, app);
       }
       const add = e.target.closest("[data-add-week]");
       if (add) {
@@ -239,8 +383,21 @@ BP.views.forecast = (function () {
       const row = e.target.closest?.("tr[data-month]");
       if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selectMonth(Number(row.dataset.month)); }
     };
+    el.onsubmit = (e) => {
+      if (!e.target.matches("[data-freeze-form]")) return;
+      e.preventDefault();
+      const name = e.target.elements.snapName.value.trim();
+      if (name) saveSnapshot(el, app, name);
+    };
     const onEdit = (e) => {
       const t = e.target;
+      if (t.matches("[data-snap-select]")) {
+        if (e.type !== "change") return;
+        st.view = t.value || null;
+        st.freezing = false;
+        render(el, app);
+        return;
+      }
       if (!t.dataset.deal || !st.draft) return;
       const deal = st.draft.deals.find((d) => d.id === t.dataset.deal);
       if (!deal) return;
@@ -257,7 +414,8 @@ BP.views.forecast = (function () {
     st.editing = false;
     st.draft = null;
     st.dirty = false;
+    st.freezing = false;
   }
 
-  return { render, reset, isDirty: () => st.dirty, resetMonth: () => { st.month = null; } };
+  return { render, reset, isDirty: () => st.dirty, resetMonth: () => { st.month = null; st.view = null; } };
 })();

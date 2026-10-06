@@ -284,11 +284,50 @@ tr.is-overdue > * { background: var(--critical-wash); }
 .status-breakdown b { color: var(--text); font-weight: 600; }
 .deals-table { margin-top: 4px; }
 
+/* frozen forecast versions */
+.snap-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 14px; }
+.snap-select { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; color: var(--text-2); }
+.snap-select select {
+  font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 8px; max-width: 100%;
+  border: 1px solid var(--axis); background: var(--surface); color: var(--text);
+}
+.freeze-form {
+  display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-bottom: 14px;
+  padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-wash);
+}
+.freeze-form label { display: inline-flex; gap: 8px; align-items: center; font-weight: 600; }
+.freeze-form input { font: inherit; padding: 6px 10px; border: 1px solid var(--axis); border-radius: 8px; background: var(--surface); color: var(--text); width: 14em; }
+.freeze-form .note { flex-basis: 100%; }
+.frozen-banner {
+  display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; padding: 10px 14px; font-size: 14px;
+  border-radius: 10px; border: 1px solid var(--accent); background: var(--accent-wash);
+}
+.btn.danger { color: var(--critical); }
+
 /* ───────── payments ───────── */
 .fx-line { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; color: var(--text-2); }
 .fx-line b { color: var(--text); }
 .fx input, .data-table input.rate-input { width: 6em; }
 .pay-table select[data-field=category] { min-width: 13em; }
+
+/* ───────── board view ───────── */
+.note { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+.sub-title { margin: 8px 0 8px; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.kpi-hero { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.month-pills.compact { margin-bottom: 0; }
+.month-pills.compact button { padding: 3px 9px; font-size: 12.5px; }
+.row-quarter-plain > * { font-weight: 500; }
+.when-presenting { display: none; }
+body.presenting .when-normal { display: none; }
+body.presenting .when-presenting { display: inline; }
+
+/* Presenting: hide the app chrome, use the whole screen, slightly larger type */
+body.presenting .topbar, body.presenting .tabs, body.presenting .banner, body.presenting .status { display: none !important; }
+body.presenting main { max-width: none; padding: 24px 32px; }
+body.presenting { font-size: 16px; }
+body.presenting .board-head h2 { font-size: 26px; }
+body.presenting .kpi-value { font-size: 32px; }
+body.presenting [data-action="print"] { display: none; }
 
 /* ───────── small screens ───────── */
 @media (max-width: 560px) {
@@ -302,8 +341,13 @@ tr.is-overdue > * { background: var(--critical-wash); }
 }
 
 /* ───────── print (board handouts) ───────── */
+@page { size: A4 landscape; margin: 12mm; }
 @media print {
-  .tabs, .banner, .actions, .year-picker button, .user, .seg, .month-pills, .table-actions { display: none !important; }
+  .tabs, .banner, .actions, .year-picker button, .user, .seg, .month-pills, .table-actions, .status { display: none !important; }
+  .topbar { padding-top: 0; }
+  main { max-width: none; }
+  .kpis { grid-template-columns: repeat(4, 1fr); }
+  .tooltip { display: none !important; }
   body, .card, .kpi, .data-table th, .data-table td { background: #fff !important; }
   .card { break-inside: avoid; border-color: #ccc; }
   .table-wrap { overflow: visible; }

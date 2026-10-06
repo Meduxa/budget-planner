@@ -4,7 +4,7 @@
   const M = BP.model;
   const S = U.S;
   const $ = (id) => document.getElementById(id);
-  const VIEW_IDS = ["dashboard", "budget", "forecast", "payments"];
+  const VIEW_IDS = ["dashboard", "board", "budget", "forecast", "payments"];
 
   const app = BP.app = {
     year: new Date().getFullYear(),
@@ -126,6 +126,7 @@
         payments: M.normalizePayments(payments),
       };
       BP.views.forecast.resetMonth();
+      BP.views.board.resetMonth();
       app.status("");
       showView();
     } catch (e) {
