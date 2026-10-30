@@ -103,14 +103,14 @@ BP.views.payments = (function () {
     const today = U.isoToday();
     const months = U.ALL.filter((m) => st.editing || d.items.some((p) => p.month === m));
     if (!months.length) return `<p class="empty">No payments for ${app.year} yet. Click <b>Edit</b> to add them.</p>`;
-    const cols = st.editing ? 9 : 7;
+    const cols = st.editing ? 10 : 7;
 
     const body = months.map((m) => {
       let items = d.items.filter((p) => p.month === m);
       if (!st.editing) items = [...items].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
       const rows = items.map((p) => (st.editing ? editRow(p) : viewRow(p, today))).join("");
       const totalRow = st.editing
-        ? `<th scope="row">${U.MONTHS[m]} total</th><td></td><td class="num" data-calc="${m}|ccy"></td><td></td><td></td><td></td><td></td>
+        ? `<th scope="row">${U.MONTHS[m]} total</th><td></td><td class="num" data-calc="${m}|ccy"></td><td></td><td></td><td></td><td></td><td></td>
            <td class="num" data-calc="${m}|base"></td><td></td>`
         : `<th scope="row">${U.MONTHS[m]} total</th><td></td><td class="num" data-calc="${m}|ccy"></td><td></td><td></td><td></td>
            <td class="num" data-calc="${m}|base"></td>`;
@@ -124,7 +124,7 @@ BP.views.payments = (function () {
 
     const head = st.editing
       ? `<th>Supplier</th><th>Label</th><th class="num">Amount</th><th>Currency</th><th class="num">Rate</th>
-         <th>Date</th><th>Status</th><th class="num">${BASE}</th><th></th>`
+         <th>Date</th><th>Month</th><th>Status</th><th class="num">${BASE}</th><th></th>`
       : `<th>Supplier</th><th>Label</th><th class="num">Amount</th><th class="num">Rate</th>
          <th>Date</th><th>Status</th><th class="num">${BASE}</th>`;
     return `<table class="data-table pay-table${st.editing ? " editing" : ""}">
@@ -163,6 +163,8 @@ BP.views.payments = (function () {
         value="${p.currency === BASE ? 1 : (p.rate ?? "")}"${p.currency === BASE ? " disabled" : ""}
         aria-label="Exchange rate, ${BASE} per 1 ${p.currency}" title="${BASE} per 1 ${p.currency} on the day of payment"></td>
       <td><input type="date" data-pay="${p.id}" data-field="date" value="${p.date}" aria-label="Date"></td>
+      <td><select data-pay="${p.id}" data-field="month" aria-label="Move to month" title="Move this payment to another month">${U.MONTHS_SHORT.map((x, i) =>
+        `<option value="${i}"${i === p.month ? " selected" : ""}>${x}</option>`).join("")}</select></td>
       <td><select data-pay="${p.id}" data-field="status" aria-label="Status">
         <option value="scheduled"${p.status === "scheduled" ? " selected" : ""}>Scheduled</option>
         <option value="paid"${p.status === "paid" ? " selected" : ""}>Paid</option></select></td>
@@ -178,7 +180,7 @@ BP.views.payments = (function () {
         st.editing = true; st.dirty = false; st.draft = U.clone(app.data.payments); render(el, app);
       } else if (action === "cancel") {
         if (st.dirty && !confirm("Discard unsaved changes?")) return;
-        reset(); render(el, app);
+        reset(); render(el, app); app.status("");
       } else if (action === "save") {
         const items = st.draft.items.filter((p) => p.supplier.trim() || p.amount != null);
         const noLabel = items.filter((p) => p.status === "paid" && !p.category).length;
@@ -215,8 +217,26 @@ BP.views.payments = (function () {
         const p = st.draft.items.find((x) => x.id === t.dataset.pay);
         if (!p) return;
         const f = t.dataset.field;
-        if (f === "amount" || f === "rate") p[f] = U.toNum(t.value);
-        else p[f] = t.value;
+        // Move to another month: chosen directly, or by a date in another month of this year
+        let moveTo = null;
+        if (f === "month") {
+          if (e.type !== "change") return;
+          moveTo = Number(t.value);
+        } else if (f === "date" && e.type === "change" && /^\d{4}-\d{2}-\d{2}$/.test(t.value)
+          && Number(t.value.slice(0, 4)) === app.year && Number(t.value.slice(5, 7)) - 1 !== p.month) {
+          moveTo = Number(t.value.slice(5, 7)) - 1;
+        }
+        if (f !== "month") {
+          if (f === "amount" || f === "rate") p[f] = U.toNum(t.value);
+          else p[f] = t.value;
+        }
+        if (moveTo != null) {
+          p.month = moveTo;
+          st.dirty = true;
+          render(el, app);
+          app.status(`Moved “${p.supplier || "payment"}” to ${U.MONTHS[moveTo]} — click Save to keep it.`);
+          return;
+        }
         if (f === "currency" && e.type === "change") {
           // switching currency: start from that currency's default rate
           p.rate = M.defaultRate(p.currency, st.draft.fx);

@@ -286,21 +286,25 @@ BP.views.forecast = (function () {
         : `<p class="empty">No deals entered for ${U.MONTHS[st.month]} yet. Click <b>Edit</b> to add them.</p>`;
     }
     const weeks = [1, 2, 3, 4, 5].filter((w) => st.editing || list.some((d) => d.week === w));
-    const head = `<thead><tr><th>Product / deal</th><th>Status</th><th class="num">USD</th>
+    const cols = st.editing ? 8 : 5;
+    // edit mode adds Month + Week (to move a deal) and a remove button
+    const moveCells = st.editing ? "<td></td><td></td>" : "";
+    const head = `<thead><tr><th>Product / deal</th><th>Status</th>
+      ${st.editing ? `<th>Month</th><th>Week</th>` : ""}<th class="num">USD</th>
       <th class="num">${U.S.currency}</th><th class="num">Profit</th>${st.editing ? "<th></th>" : ""}</tr></thead>`;
     const blocks = weeks.map((w) => {
       const rows = list.filter((d) => d.week === w).map(dealRow).join("");
       return `<tbody class="week">
-        <tr class="row-section"><th colspan="${st.editing ? 6 : 5}">Week ${U.ROMAN[w]}</th></tr>
+        <tr class="row-section"><th colspan="${cols}">Week ${U.ROMAN[w]}</th></tr>
         ${rows}
-        ${st.editing ? `<tr class="row-add"><td colspan="6"><button class="btn small" data-add-week="${w}">+ Add deal to week ${U.ROMAN[w]}</button></td></tr>` : ""}
-        <tr class="row-quarter"><th scope="row">Week ${U.ROMAN[w]} total</th><td></td>
+        ${st.editing ? `<tr class="row-add"><td colspan="${cols}"><button class="btn small" data-add-week="${w}">+ Add deal to week ${U.ROMAN[w]}</button></td></tr>` : ""}
+        <tr class="row-quarter"><th scope="row">Week ${U.ROMAN[w]} total</th><td></td>${moveCells}
           <td class="num" data-calc="${w}|usd"></td><td class="num" data-calc="${w}|gel"></td><td class="num" data-calc="${w}|profit"></td>${st.editing ? "<td></td>" : ""}</tr>
       </tbody>`;
     }).join("");
     return `<div class="table-wrap"><table class="data-table deals-table${st.editing ? " editing" : ""}">
       ${head}${blocks}
-      <tbody><tr class="row-annual"><th scope="row">${U.MONTHS[st.month]} total</th><td></td>
+      <tbody><tr class="row-annual"><th scope="row">${U.MONTHS[st.month]} total</th><td></td>${moveCells}
         <td class="num" data-calc="month|usd"></td><td class="num" data-calc="month|gel"></td><td class="num" data-calc="month|profit"></td>${st.editing ? "<td></td>" : ""}</tr></tbody>
     </table></div>`;
   }
@@ -321,6 +325,10 @@ BP.views.forecast = (function () {
       <td><input class="text-input" data-deal="${d.id}" data-field="product" value="${esc(d.product)}" aria-label="Product"></td>
       <td><select data-deal="${d.id}" data-field="status" aria-label="Status">${STATUSES.map((x) =>
         `<option value="${x.key}"${x.key === d.status ? " selected" : ""}>${esc(x.label)}</option>`).join("")}</select></td>
+      <td><select data-deal="${d.id}" data-field="month" aria-label="Move to month" title="Move this deal to another month">${U.MONTHS_SHORT.map((x, i) =>
+        `<option value="${i}"${i === d.month ? " selected" : ""}>${x}</option>`).join("")}</select></td>
+      <td><select data-deal="${d.id}" data-field="week" aria-label="Move to week" title="Move this deal to another week">${[1, 2, 3, 4, 5].map((w) =>
+        `<option value="${w}"${w === d.week ? " selected" : ""}>${U.ROMAN[w]}</option>`).join("")}</select></td>
       <td class="num">${numIn("usd", "USD amount")}</td>
       <td class="num">${numIn("gel", `${U.S.currency} amount`)}</td>
       <td class="num">${numIn("profit", "Profit")}</td>
@@ -347,7 +355,7 @@ BP.views.forecast = (function () {
         st.editing = true; st.dirty = false; st.freezing = false; st.draft = U.clone(app.data.forecast); render(el, app);
       } else if (action === "cancel") {
         if (st.dirty && !confirm("Discard unsaved changes?")) return;
-        reset(); render(el, app);
+        reset(); render(el, app); app.status("");
       } else if (action === "save") {
         // keep the frozen versions; only the live deals change
         const clean = {
@@ -402,6 +410,15 @@ BP.views.forecast = (function () {
       const deal = st.draft.deals.find((d) => d.id === t.dataset.deal);
       if (!deal) return;
       const f = t.dataset.field;
+      if (f === "month" || f === "week") {
+        // move the deal: redraw so it appears under its new week / leaves this month
+        if (e.type !== "change") return;
+        deal[f] = Number(t.value);
+        st.dirty = true;
+        render(el, app);
+        app.status(`Moved “${deal.product || "deal"}” to ${U.MONTHS[deal.month]}, week ${U.ROMAN[deal.week]} — click Save to keep it.`);
+        return;
+      }
       deal[f] = f === "product" || f === "status" ? t.value : U.toNum(t.value);
       st.dirty = true;
       updateComputed(el, app);
